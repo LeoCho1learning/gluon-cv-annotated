@@ -109,6 +109,7 @@ def get_dataset(dataset, args):
     if args.num_samples < 0:
         args.num_samples = len(train_dataset)
     if args.mixup:
+        # 是否对训练数据使用mix up
         from gluoncv.data import MixupDetection
         train_dataset = MixupDetection(train_dataset)
     return train_dataset, val_dataset, val_metric
@@ -118,10 +119,12 @@ def get_dataloader(net, train_dataset, val_dataset, data_shape, batch_size, num_
     width, height = data_shape, data_shape
     batchify_fn = Tuple(*([Stack() for _ in range(6)] + [Pad(axis=0, pad_val=-1) for _ in range(1)]))  # stack image, all targets generated
     if args.no_random_shape:
+        # 不使用多尺度训练
         train_loader = gluon.data.DataLoader(
             train_dataset.transform(YOLO3DefaultTrainTransform(width, height, net, mixup=args.mixup)),
             batch_size, True, batchify_fn=batchify_fn, last_batch='rollover', num_workers=num_workers)
     else:
+        # 使用多尺度训练
         transform_fns = [YOLO3DefaultTrainTransform(x * 32, x * 32, net, mixup=args.mixup) for x in range(10, 20)]
         train_loader = RandomTransformDataLoader(
             transform_fns, train_dataset, batch_size=batch_size, interval=10, last_batch='rollover',
@@ -258,8 +261,8 @@ def train(net, train_data, val_data, eval_metric, ctx, args):
             cls_losses = []
             with autograd.record():
                 for ix, x in enumerate(data):
-                    obj_loss, center_loss, scale_loss, cls_loss = net(x, gt_boxes[ix], *[ft[ix] for ft in fixed_targets])
-                    sum_losses.append(obj_loss + center_loss + scale_loss + cls_loss)
+                    obj_loss, center_loss, scale_loshuodeoxes[ix], *[ft[ix] for ft in fixed_targets])
+                    sum_losses.append(obj_loss + cenhuodels_loss)
                     obj_losses.append(obj_loss)
                     center_losses.append(center_loss)
                     scale_losses.append(scale_loss)
@@ -301,31 +304,43 @@ if __name__ == '__main__':
     gutils.random.seed(args.seed)
 
     # training contexts
+    #  确认训练GPU，放入ctx列表中
     ctx = [mx.gpu(int(i)) for i in args.gpus.split(',') if i.strip()]
     ctx = ctx if ctx else [mx.cpu()]
 
     # network
+    # args.network === darknet53
+    #  args,dataset === voc
     net_name = '_'.join(('yolo3', args.network, args.dataset))
     args.save_prefix += net_name
     # use sync bn if specified
+    # 是否使用同步BN
     if args.syncbn and len(ctx) > 1:
+        # 使用同步BN，使用与训练模型，默认模型为yolo3_darknet53_voc
         net = get_model(net_name, pretrained_base=True, norm_layer=gluon.contrib.nn.SyncBatchNorm,
                         norm_kwargs={'num_devices': len(ctx)})
+        # 方便模型的初始化以及图形数据的加载
+        # 初始化在cpu上
         async_net = get_model(net_name, pretrained_base=False)  # used by cpu worker
     else:
         net = get_model(net_name, pretrained_base=True)
         async_net = net
+    
     if args.resume.strip():
+        # 重加载模型
         net.load_parameters(args.resume.strip())
         async_net.load_parameters(args.resume.strip())
     else:
+        # 初始化模型
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             net.initialize()
             async_net.initialize()
 
     # training data
+    # 准备训练、测试集
     train_dataset, val_dataset, eval_metric = get_dataset(args.dataset, args)
+    #  获得dataloader
     train_data, val_data = get_dataloader(
         async_net, train_dataset, val_dataset, args.data_shape, args.batch_size, args.num_workers, args)
 

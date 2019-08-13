@@ -62,16 +62,21 @@ class YOLOOutputV3(gluon.HybridBlock):
     def __init__(self, index, num_class, anchors, stride,
                  alloc_size=(128, 128), **kwargs):
         super(YOLOOutputV3, self).__init__(**kwargs)
+        # 将anchor从list存储改为np.array的存储
         anchors = np.array(anchors).astype('float32')
         self._classes = num_class
+        # 预测一个obj_score, cx,cy,w,h,类别分数
         self._num_pred = 1 + 4 + num_class  # 1 objness + 4 box + num_class
+        # 框的个数
         self._num_anchors = anchors.size // 2
         self._stride = stride
         with self.name_scope():
+            # 输出的总通道数=框的数量 * 每个框需要预测的值
             all_pred = self._num_pred * self._num_anchors
             self.prediction = nn.Conv2D(all_pred, kernel_size=1, padding=0, strides=1)
             # anchors will be multiplied to predictions
             anchors = anchors.reshape(1, 1, -1, 2)
+            # 注册参数，这里注册的参数将自动作为关键字参数传入hybrid_forward()中
             self.anchors = self.params.get_constant('anchor_%d'%(index), anchors)
             # offsets will be added to predictions
             grid_x = np.arange(alloc_size[1])
@@ -81,6 +86,7 @@ class YOLOOutputV3(gluon.HybridBlock):
             offsets = np.concatenate((grid_x[:, :, np.newaxis], grid_y[:, :, np.newaxis]), axis=-1)
             # expand dims to (1, 1, n, n, 2) so it's easier for broadcasting
             offsets = np.expand_dims(np.expand_dims(offsets, axis=0), axis=0)
+            # 注册参数，这里注册的参数将自动作为关键字参数传入hybrid_forward()中
             self.offsets = self.params.get_constant('offset_%d'%(index), offsets)
 
     def reset_class(self, classes, reuse_weights=None):
@@ -158,12 +164,19 @@ class YOLOOutputV3(gluon.HybridBlock):
         # transpose to (batch, height * width, num_anchor, num_pred)
         pred = pred.transpose(axes=(0, 2, 1)).reshape((0, -1, self._num_anchors, self._num_pred))
         # components
+        # cx, cy
         raw_box_centers = pred.slice_axis(axis=-1, begin=0, end=2)
+        # w, h
         raw_box_scales = pred.slice_axis(axis=-1, begin=2, end=4)
+        # obj_score: Pr(obj) * IOU
         objness = pred.slice_axis(axis=-1, begin=4, end=5)
+        # Pr(class|obj)
         class_pred = pred.slice_axis(axis=-1, begin=5, end=None)
 
         # valid offsets, (1, 1, height, width, 2)
+        # x: n * c * h * w
+        # offsets的初始值为0
+        # 这里offset的作用是：(TO_DO:)
         offsets = F.slice_like(offsets, x * 0, axes=(2, 3))
         # reshape to (1, height*width, 1, 2)
         offsets = offsets.reshape((1, -1, 1, 2))
@@ -173,13 +186,19 @@ class YOLOOutputV3(gluon.HybridBlock):
         confidence = F.sigmoid(objness)
         class_score = F.broadcast_mul(F.sigmoid(class_pred), confidence)
         wh = box_scales / 2.0
+        # 收集预测出的框
+        # 这里的bbox是corner的格式
         bbox = F.concat(box_centers - wh, box_centers + wh, dim=-1)
 
         if autograd.is_training():
             # during training, we don't need to convert whole bunch of info to detection results
+            # 训练过程的返回值：
+            # TO_DO:
             return (bbox.reshape((0, -1, 4)), raw_box_centers, raw_box_scales,
                     objness, class_pred, anchors, offsets)
-
+        
+        # 预测的输出：
+        # TO_DO:
         # prediction per class
         bboxes = F.tile(bbox, reps=(self._classes, 1, 1, 1, 1))
         scores = F.transpose(class_score, axes=(3, 0, 1, 2)).expand_dims(axis=-1)
@@ -208,6 +227,7 @@ class YOLODetectionBlockV3(gluon.HybridBlock):
     """
     def __init__(self, channel, norm_layer=BatchNorm, norm_kwargs=None, **kwargs):
         super(YOLODetectionBlockV3, self).__init__(**kwargs)
+        # detection block的channel数必须能够被2整除
         assert channel % 2 == 0, "channel {} cannot be divided by 2".format(channel)
         with self.name_scope():
             self.body = nn.HybridSequential(prefix='')
@@ -223,6 +243,8 @@ class YOLODetectionBlockV3(gluon.HybridBlock):
             self.tip = _conv2d(channel * 2, 3, 1, 1, norm_layer=norm_layer, norm_kwargs=norm_kwargs)
 
     # pylint: disable=unused-argument
+    # route:
+    # tip: 用在output block中用于预测的特征图
     def hybrid_forward(self, F, x):
         route = self.body(x)
         tip = self.tip(route)
@@ -294,13 +316,22 @@ class YOLOV3(gluon.HybridBlock):
             self.transitions = nn.HybridSequential()
             self.yolo_blocks = nn.HybridSequential()
             self.yolo_outputs = nn.HybridSequential()
+            # stages: [base_net.features[:15], base_net.features[15:24], base_net.features[24:]]
+            # channels:  [512, 256, 128]
+            # anchors: [[10, 13, 16, 30, 33, 23], [30, 61, 62, 45, 59, 119], [116, 90, 156, 198, 373, 326]]
+            # strides: [8, 16, 32]
             # note that anchors and strides should be used in reverse order
+            # 组建yolov3检测网络
             for i, stage, channel, anchor, stride in zip(
                     range(len(stages)), stages, channels, anchors[::-1], strides[::-1]):
                 self.stages.add(stage)
+                # 存储yolo的detection block
+                # detection block 负责进行yolo detection
                 block = YOLODetectionBlockV3(
                     channel, norm_layer=norm_layer, norm_kwargs=norm_kwargs)
                 self.yolo_blocks.add(block)
+                #  存储yolo的output block
+                # output block是最后负责训练与与测试时的输出的block
                 output = YOLOOutputV3(i, len(classes), anchor, stride, alloc_size=alloc_size)
                 self.yolo_outputs.add(output)
                 if i > 0:
@@ -355,12 +386,16 @@ class YOLOV3(gluon.HybridBlock):
         all_feat_maps = []
         all_detections = []
         routes = []
+        # 获得3个用来预测的stage的特征图，并存储在routes中
         for stage, block, output in zip(self.stages, self.yolo_blocks, self.yolo_outputs):
             x = stage(x)
             routes.append(x)
 
         # the YOLO output layers are used in reverse order, i.e., from very deep layers to shallow
+        # 这里的第一次循环中x应该已经是最后一个阶段的特征图了，因为已经经过了上面的循环
+        # 这里要对3个stage都进行这样的操作
         for i, block, output in zip(range(len(routes)), self.yolo_blocks, self.yolo_outputs):
+            # block即YOLODetectionBlockV3
             x, tip = block(x)
             if autograd.is_training():
                 dets, box_centers, box_scales, objness, class_pred, anchors, offsets = output(tip)
@@ -371,6 +406,8 @@ class YOLOV3(gluon.HybridBlock):
                 all_anchors.append(anchors)
                 all_offsets.append(offsets)
                 # here we use fake featmap to reduce memory consuption, only shape[2, 3] is used
+                # tip是由YOLODetectionBlockV3得到的，N * C * H * W，只是单纯的特征图，暂时各个维度还没有
+                # 什么特殊的含义
                 fake_featmap = F.zeros_like(tip.slice_axis(
                     axis=0, begin=0, end=1).slice_axis(axis=1, begin=0, end=1))
                 all_feat_maps.append(fake_featmap)
@@ -561,6 +598,7 @@ def get_yolov3(name, stages, filters, anchors, strides, classes,
         net.load_parameters(get_model_file(full_name, tag=pretrained, root=root), ctx=ctx)
     return net
 
+# 默认使用的模型
 def yolo3_darknet53_voc(pretrained_base=True, pretrained=False,
                         norm_layer=BatchNorm, norm_kwargs=None, **kwargs):
     """YOLO3 multi-scale with darknet53 base network on VOC dataset.
@@ -585,9 +623,13 @@ def yolo3_darknet53_voc(pretrained_base=True, pretrained=False,
     """
     from ...data import VOCDetection
     pretrained_base = False if pretrained else pretrained_base
+    # 获得基础网络darknet53
     base_net = darknet53(
         pretrained=pretrained_base, norm_layer=norm_layer, norm_kwargs=norm_kwargs, **kwargs)
+    # yolo3分别在3个特征层进行预测，分别是*8，*16，*32
     stages = [base_net.features[:15], base_net.features[15:24], base_net.features[24:]]
+    # 这里anchor代表的含义：3个子列表分别代表三个不同层所负责的anchor大小，例如*8的负责的是最小的anchor
+    # 这里的anchor是相对于resize过后的原图，（w,h）
     anchors = [[10, 13, 16, 30, 33, 23], [30, 61, 62, 45, 59, 119], [116, 90, 156, 198, 373, 326]]
     strides = [8, 16, 32]
     classes = VOCDetection.CLASSES

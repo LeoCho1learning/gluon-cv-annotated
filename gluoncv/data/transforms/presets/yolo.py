@@ -140,10 +140,13 @@ class YOLO3DefaultTrainTransform(object):
             return
 
         # in case network has reset_ctx to gpu
+        # 准备fake数据用于生成anchor
+        # TO_DO：是否同样帮助了模型的延后初始化
         self._fake_x = mx.nd.zeros((1, 3, height, width))
         net = copy.deepcopy(net)
         net.collect_params().reset_ctx(None)
         with autograd.train_mode():
+            # 设置为train_mode，获取anchor等其他需要的信息
             _, self._anchors, self._offsets, self._feat_maps, _, _, _, _ = net(self._fake_x)
         from ....model_zoo.yolo.yolo_target import YOLOV3PrefetchTargetGenerator
         self._target_generator = YOLOV3PrefetchTargetGenerator(

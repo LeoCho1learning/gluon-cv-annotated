@@ -39,6 +39,7 @@ class DarknetBasicBlockV3(gluon.HybridBlock):
         super(DarknetBasicBlockV3, self).__init__(**kwargs)
         self.body = nn.HybridSequential(prefix='')
         # 1x1 reduce
+        # 1*1卷积用于降维
         self.body.add(_conv2d(channel, 1, 0, 1, norm_layer=norm_layer, norm_kwargs=norm_kwargs))
         # 3x3 conv expand
         self.body.add(_conv2d(channel * 2, 3, 1, 1, norm_layer=norm_layer, norm_kwargs=norm_kwargs))
@@ -87,12 +88,15 @@ class DarknetV3(gluon.HybridBlock):
             # first 3x3 conv
             self.features.add(_conv2d(channels[0], 3, 1, 1,
                                       norm_layer=norm_layer, norm_kwargs=norm_kwargs))
+            #  除去第一层后，后面分为5个大块
             for nlayer, channel in zip(layers, channels[1:]):
                 assert channel % 2 == 0, "channel {} cannot be divided by 2".format(channel)
                 # add downsample conv with stride=2
+                # 添加用于降采样的卷积块
                 self.features.add(_conv2d(channel, 3, 1, 2,
                                           norm_layer=norm_layer, norm_kwargs=norm_kwargs))
                 # add nlayer basic blocks
+                # 添加参差模块
                 for _ in range(nlayer):
                     self.features.add(DarknetBasicBlockV3(channel // 2,
                                                           norm_layer=BatchNorm,
@@ -102,6 +106,7 @@ class DarknetV3(gluon.HybridBlock):
 
     def hybrid_forward(self, F, x):
         x = self.features(x)
+        # 使用global_pool时，忽略kernel的值
         x = F.Pooling(x, kernel=(7, 7), global_pool=True, pool_type='avg')
         return self.output(x)
 
@@ -146,15 +151,22 @@ def get_darknet(darknet_version, num_layers, pretrained=False, ctx=mx.cpu(),
     >>> print(model)
 
     """
+
+    # 确认darknet的版本与网络层数
     assert darknet_version in darknet_versions and darknet_version in darknet_spec, (
         "Invalid darknet version: {}. Options are {}".format(
             darknet_version, str(darknet_versions.keys())))
+    # specs: 53: ([1, 2, 8, 8, 4], [32, 64, 128, 256, 512, 1024])
     specs = darknet_spec[darknet_version]
     assert num_layers in specs, (
         "Invalid number of layers: {}. Options are {}".format(num_layers, str(specs.keys())))
+    # layers : [1, 2, 8, 8, 4]
+    # channels: [32, 64, 128, 256, 512, 1024]
     layers, channels = specs[num_layers]
+    # darknet_class: DarknetV3
     darknet_class = darknet_versions[darknet_version]
     net = darknet_class(layers, channels, **kwargs)
+    # 是否加载预训练参数
     if pretrained:
         from ..model_store import get_model_file
         net.load_parameters(get_model_file(
