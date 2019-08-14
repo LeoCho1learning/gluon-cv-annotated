@@ -261,8 +261,8 @@ def train(net, train_data, val_data, eval_metric, ctx, args):
             cls_losses = []
             with autograd.record():
                 for ix, x in enumerate(data):
-                    obj_loss, center_loss, scale_loshuodeoxes[ix], *[ft[ix] for ft in fixed_targets])
-                    sum_losses.append(obj_loss + cenhuodels_loss)
+                    obj_loss, center_loss, scale_loss, cls_loss = net(x, gt_boxes[ix], *[ft[ix] for ft in fixed_targets])
+                    sum_losses.append(obj_loss + center_loss + scale_loss + cls_loss)
                     obj_losses.append(obj_loss)
                     center_losses.append(center_loss)
                     scale_losses.append(scale_loss)

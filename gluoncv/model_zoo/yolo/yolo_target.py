@@ -60,17 +60,22 @@ class YOLOV3PrefetchTargetGenerator(gluon.Block):
         """
         assert isinstance(anchors, (list, tuple))
         # 这里的anchors中是一个大列表套接着三个小列表
+        # 以416*416为例，all_anchors---(9, 2)
         all_anchors = nd.concat(*[a.reshape(-1, 2) for a in anchors], dim=0)
         assert isinstance(offsets, (list, tuple))
         #  这里offsets的作用
+        # 以416*416为例，all_offsets---(3549, 2), 3549 = 169(13*13) + 676(26*26) + 2704(52*52)
         all_offsets = nd.concat(*[o.reshape(-1, 2) for o in offsets], dim=0)
+        # 以416*416为例，num_anchors----[3, 6, 9]
         num_anchors = np.cumsum([a.size // 2 for a in anchors])
+        # 以416*416为例，num_offsets----[169, 845, 3549]
         num_offsets = np.cumsum([o.size // 2 for o in offsets])
         _offsets = [0] + num_offsets.tolist()
         assert isinstance(xs, (list, tuple))
         assert len(xs) == len(anchors) == len(offsets)
 
         # orig image size
+        # 获取训练图片的大小
         orig_height = img.shape[2]
         orig_width = img.shape[3]
         with autograd.pause():

@@ -175,12 +175,12 @@ class YOLOOutputV3(gluon.HybridBlock):
 
         # valid offsets, (1, 1, height, width, 2)
         # x: n * c * h * w
-        # offsets的初始值为0
-        # 这里offset的作用是：(TO_DO:)
+        # 这里offset的作用是：这里的offset指的就是cell左上角的坐标值，例如416下采样到13*13，这里的offset就是(0, 0)~(12,12)
         offsets = F.slice_like(offsets, x * 0, axes=(2, 3))
         # reshape to (1, height*width, 1, 2)
         offsets = offsets.reshape((1, -1, 1, 2))
 
+        # 这里就是按照yolo3 paper中介绍anchor的方式，将预测值还原到原图上
         box_centers = F.broadcast_add(F.sigmoid(raw_box_centers), offsets) * self._stride
         box_scales = F.broadcast_mul(F.exp(raw_box_scales), anchors)
         confidence = F.sigmoid(objness)
