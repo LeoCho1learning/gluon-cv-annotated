@@ -59,8 +59,10 @@ class YOLOV3PrefetchTargetGenerator(gluon.Block):
 
         """
         assert isinstance(anchors, (list, tuple))
+        # 这里的anchors中是一个大列表套接着三个小列表
         all_anchors = nd.concat(*[a.reshape(-1, 2) for a in anchors], dim=0)
         assert isinstance(offsets, (list, tuple))
+        #  这里offsets的作用
         all_offsets = nd.concat(*[o.reshape(-1, 2) for o in offsets], dim=0)
         num_anchors = np.cumsum([a.size // 2 for a in anchors])
         num_offsets = np.cumsum([o.size // 2 for o in offsets])

@@ -193,6 +193,13 @@ class YOLOOutputV3(gluon.HybridBlock):
         if autograd.is_training():
             # during training, we don't need to convert whole bunch of info to detection results
             # 训练过程的返回值：
+            # bbox.reshape((0, -1, 4))：检测出的bbox并换成了corner的格式
+            # raw_box_centers：
+            # raw_box_scales：
+            # objness：
+            # class_pred：
+            # anchors：
+            # offsets：
             # TO_DO:
             return (bbox.reshape((0, -1, 4)), raw_box_centers, raw_box_scales,
                     objness, class_pred, anchors, offsets)
@@ -243,7 +250,8 @@ class YOLODetectionBlockV3(gluon.HybridBlock):
             self.tip = _conv2d(channel * 2, 3, 1, 1, norm_layer=norm_layer, norm_kwargs=norm_kwargs)
 
     # pylint: disable=unused-argument
-    # route:
+    # route: 用于FPN的组成，这里因为降采样后通道数会变为原来的两倍，这里就保存了原来的值
+    # 后面该层的预测，由tip完成
     # tip: 用在output block中用于预测的特征图
     def hybrid_forward(self, F, x):
         route = self.body(x)
@@ -387,6 +395,7 @@ class YOLOV3(gluon.HybridBlock):
         all_detections = []
         routes = []
         # 获得3个用来预测的stage的特征图，并存储在routes中
+        # 这里routes中存储的特征图关于降采样的顺序是正序的，即*8, *16, *32
         for stage, block, output in zip(self.stages, self.yolo_blocks, self.yolo_outputs):
             x = stage(x)
             routes.append(x)
@@ -396,6 +405,8 @@ class YOLOV3(gluon.HybridBlock):
         # 这里要对3个stage都进行这样的操作
         for i, block, output in zip(range(len(routes)), self.yolo_blocks, self.yolo_outputs):
             # block即YOLODetectionBlockV3
+            # tip：用于output层的预测
+            # x：这里就是detection block中的route
             x, tip = block(x)
             if autograd.is_training():
                 dets, box_centers, box_scales, objness, class_pred, anchors, offsets = output(tip)
@@ -408,23 +419,36 @@ class YOLOV3(gluon.HybridBlock):
                 # here we use fake featmap to reduce memory consuption, only shape[2, 3] is used
                 # tip是由YOLODetectionBlockV3得到的，N * C * H * W，只是单纯的特征图，暂时各个维度还没有
                 # 什么特殊的含义
+                # 这里得到的维度就是 1 * 1 * H * W，值为1
                 fake_featmap = F.zeros_like(tip.slice_axis(
                     axis=0, begin=0, end=1).slice_axis(axis=1, begin=0, end=1))
+                # 这个地方实际上就是为了得到不同stage用于预测的特征图的大小
                 all_feat_maps.append(fake_featmap)
             else:
+                # 如果是在训练过程中，则只需要返回部分需要的信息即可，这里在output block的forward中有写
                 dets = output(tip)
             all_detections.append(dets)
+            # 下面开始进行逐步组建FPN
             if i >= len(routes) - 1:
                 break
             # add transition layers
+            # transition block是一个1*1的卷积
             x = self.transitions[i](x)
             # upsample feature map reverse to shallow layers
+            # 上采样，但这里上采样的方法比较粗暴
             upsample = _upsample(x, stride=2)
+            # 这里将route中的特征图顺序进行翻转，这样下采样多的层就可以上采样后方便的与同等size的特征图进行融合操作
             route_now = routes[::-1][i + 1]
+            # 这里的slice_like应该是为了保证能够多尺度训练，因为在下采样的过程中，特征图可能被降采样称为奇数这样的大小
+            # 此时继续进行下采样，特征图的大小会有一个floor的操作，这样的话，上采样出来的特征图一定是>=原来的上一级的特征图，这时就需要slice_like来控制特征图的大小
             x = F.concat(F.slice_like(upsample, route_now * 0, axes=(2, 3)), route_now, dim=1)
 
         if autograd.is_training():
             # during training, the network behaves differently since we don't need detection results
+            # 这里主要是为了将真正的训练与获取anchor时的操作给分离开来
+            # 真正进行训练的时候，使用的是with autograd.record()，获取anchor时的操作时使用的是with autograd.train_mode()
+            # 可以知道的是autograd.train_mode()主要是将autograd.is_training()设置为true，这个状态主要控制的是bn，dropout等训练与预测表现不同的算子操作
+            # autograd.record()，则是将autograd.is_training()，autograd.is_recording()都设置为true，而autograd.is_recording()反应的主要就是loss的反向传播，因此就算是autograd.is_training()为false，也是可以进行反向传播操作的
             if autograd.is_recording():
                 # generate losses and return them directly
                 box_preds = F.concat(*all_detections, dim=1)
@@ -434,6 +458,7 @@ class YOLOV3(gluon.HybridBlock):
                 return self._loss(*(all_preds + all_targets))
 
             # return raw predictions, this is only used in DataLoader transform function.
+            # 只设置训练模式，不进行反向传播，只在DataLoader中使用
             return (F.concat(*all_detections, dim=1), all_anchors, all_offsets, all_feat_maps,
                     F.concat(*all_box_centers, dim=1), F.concat(*all_box_scales, dim=1),
                     F.concat(*all_objectness, dim=1), F.concat(*all_class_pred, dim=1))
