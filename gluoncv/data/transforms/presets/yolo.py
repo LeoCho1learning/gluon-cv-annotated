@@ -147,6 +147,10 @@ class YOLO3DefaultTrainTransform(object):
         net.collect_params().reset_ctx(None)
         with autograd.train_mode():
             # 设置为train_mode，获取anchor等其他需要的信息
+            # 得到信息：
+            # _anchors: 列表中装着每个层的3个anchor的大小
+            # _offsets: 每个cell的左上角坐标值 
+            # _feat_maps：用于获得各层的特征图大小
             _, self._anchors, self._offsets, self._feat_maps, _, _, _, _ = net(self._fake_x)
         from ....model_zoo.yolo.yolo_target import YOLOV3PrefetchTargetGenerator
         self._target_generator = YOLOV3PrefetchTargetGenerator(

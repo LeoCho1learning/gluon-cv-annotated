@@ -198,7 +198,7 @@ class YOLOOutputV3(gluon.HybridBlock):
             # raw_box_scales：
             # objness：
             # class_pred：
-            # anchors：
+            # anchors：这里返回的仍然是框预设的w,h， 格式为(1, 1, -1, 2)
             # offsets：
             # TO_DO:
             return (bbox.reshape((0, -1, 4)), raw_box_centers, raw_box_scales,
@@ -414,6 +414,7 @@ class YOLOV3(gluon.HybridBlock):
                 all_box_scales.append(box_scales.reshape((0, -3, -1)))
                 all_objectness.append(objness.reshape((0, -3, -1)))
                 all_class_pred.append(class_pred.reshape((0, -3, -1)))
+                # 将anchor[(1,1,-1,2)]装在一个列表当中，层数由top到bottom
                 all_anchors.append(anchors)
                 all_offsets.append(offsets)
                 # here we use fake featmap to reduce memory consuption, only shape[2, 3] is used

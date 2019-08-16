@@ -80,25 +80,40 @@ class YOLOV3PrefetchTargetGenerator(gluon.Block):
         orig_width = img.shape[3]
         with autograd.pause():
             # outputs
+            # shape_like: (N * 3549 * 9 * 2): 部分target的维度
             shape_like = all_anchors.reshape((1, -1, 2)) * all_offsets.reshape(
                 (-1, 1, 2)).expand_dims(0).repeat(repeats=gt_ids.shape[0], axis=0)
+            # 下面就是存储需要返回的转换好的ground truth值
+            # center_targets：cx, cy , (N * 3549 * 9 * 2)
             center_targets = nd.zeros_like(shape_like)
+             # scale_targets: w, h , (N * 3549 * 9 * 2)
             scale_targets = nd.zeros_like(center_targets)
+            # weights: 含义(TO_DO ), (N * 3549 * 9 * 2)
             weights = nd.zeros_like(center_targets)
+            # objectness： 置信度, (N * 3549 * 9 * 1)
             objectness = nd.zeros_like(weights.split(axis=-1, num_outputs=2)[0])
+            # class_targets： target的label值，这里用one-hot向量表示, (N * 3549 * 9 * self._num_class)，初始值全部设置为-1，代表忽略
             class_targets = nd.one_hot(objectness.squeeze(axis=-1), depth=self._num_class)
             class_targets[:] = -1  # prefill -1 for ignores
 
             # for each ground-truth, find the best matching anchor within the particular grid
             # for instance, center of object 1 reside in grid (3, 4) in (16, 16) feature map
             # then only the anchor in (3, 4) is going to be matched
+            # 寻找最为匹配的anchor值
+            # 由于yolo进行iou匹配时，只看大小上的匹配，这里将box的格式从corner转换为center
             gtx, gty, gtw, gth = self.bbox2center(gt_boxes)
+            # 得到一个以(0, 0)为中心点，与样本框同样大小的框，格式又转换为了corner格式
             shift_gt_boxes = nd.concat(-0.5 * gtw, -0.5 * gth, 0.5 * gtw, 0.5 * gth, dim=-1)
+            # 给预设的9个anchor，前面添加(0,0,)，得到如(0, 0, 116, 90)，即变成了center格式的，大小为预设框大小的框
             anchor_boxes = nd.concat(0 * all_anchors, all_anchors, dim=-1)  # zero center anchors
+            # 将预设框格式转换为corner的格式与gt的格式对齐
             shift_anchor_boxes = self.bbox2corner(anchor_boxes)
+            # 求取anchor 与 gt box的 iou 值
             ious = nd.contrib.box_iou(shift_anchor_boxes, shift_gt_boxes).transpose((1, 0, 2))
             # real value is required to process, convert to Numpy
+            # 得到每个gt box与哪一个预设框匹配的最好，也即iou最大
             matches = ious.argmax(axis=1).asnumpy()  # (B, M)
+            # valid_gts是
             valid_gts = (gt_boxes >= 0).asnumpy().prod(axis=-1)  # (B, M)
             np_gtx, np_gty, np_gtw, np_gth = [x.asnumpy() for x in [gtx, gty, gtw, gth]]
             np_anchors = all_anchors.asnumpy()
