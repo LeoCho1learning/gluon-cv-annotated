@@ -113,7 +113,7 @@ class YOLOV3PrefetchTargetGenerator(gluon.Block):
             # real value is required to process, convert to Numpy
             # 得到每个gt box与哪一个预设框匹配的最好，也即iou最大
             matches = ious.argmax(axis=1).asnumpy()  # (B, M)
-            # valid_gts是
+            # valid_gts是用来记录有效的box的信息，这里相当于一个mask值，对于在dataloader中为了batch同意而pad成-1的框，给出-1的mask值
             valid_gts = (gt_boxes >= 0).asnumpy().prod(axis=-1)  # (B, M)
             np_gtx, np_gty, np_gtw, np_gth = [x.asnumpy() for x in [gtx, gty, gtw, gth]]
             np_anchors = all_anchors.asnumpy()
@@ -121,31 +121,46 @@ class YOLOV3PrefetchTargetGenerator(gluon.Block):
             np_gt_mixratios = gt_mixratio.asnumpy() if gt_mixratio is not None else None
             # TODO(zhreshold): the number of valid gt is not a big number, therefore for loop
             # should not be a problem right now. Switch to better solution is needed.
+            # 外循环：batch的大小，内循环：一张图片中框的匹配层数
             for b in range(matches.shape[0]):
                 for m in range(matches.shape[1]):
+                    # pad的过程中是向下增加pad，因此遇到第一个0时，就可跳出当前内循环，进去下一张图片
                     if valid_gts[b, m] < 1:
                         break
+                    # 第b张图片的第m个框匹配的最佳anchor的索引 ，这里anchor的索引是从大到小
                     match = int(matches[b, m])
+                    # 确切的得到这个框所匹配的anchor处于哪一层
                     nlayer = np.nonzero(num_anchors > match)[0][0]
+                    # 这里的xs是特征图的集合，这里用以在选择特征图后，提供特征图的高宽
                     height = xs[nlayer].shape[2]
                     width = xs[nlayer].shape[3]
+                    # 得到当前框真实的(cx,cy,w,h)，相对于原图上的坐标
                     gtx, gty, gtw, gth = (np_gtx[b, m, 0], np_gty[b, m, 0],
                                           np_gtw[b, m, 0], np_gth[b, m, 0])
                     # compute the location of the gt centers
+                    # 将目标框的cx, cy映射到对应anchor层的特征图的坐标
                     loc_x = int(gtx / orig_width * width)
                     loc_y = int(gty / orig_height * height)
                     # write back to targets
+                    # 获取框匹配的cell的索引
                     index = _offsets[nlayer] + loc_y * width + loc_x
+                    # 这里组成一个batch的标签的方法是，做一个B*Cell*Anchor*x ,这里的x针对不同的类别值不相同，例如对于center坐标，就是2
+                    #获得了cx, cy的标签值，取值范围[0,1] 
                     center_targets[b, index, match, 0] = gtx / orig_width * width - loc_x  # tx
                     center_targets[b, index, match, 1] = gty / orig_height * height - loc_y  # ty
+                    # 获得w,h的标签值
                     scale_targets[b, index, match, 0] = np.log(max(gtw, 1) / np_anchors[match, 0])
                     scale_targets[b, index, match, 1] = np.log(max(gth, 1) / np_anchors[match, 1])
+                    # 这里是为了减小box大小对于loss的影响，在YOLOv1中使用的是预测根号w的方式，这里采用的是如下加权重的方式
                     weights[b, index, match, :] = 2.0 - gtw * gth / orig_width / orig_height
+                    # 这里一般讲objectness的target值设置为1
                     objectness[b, index, match, 0] = (
                         np_gt_mixratios[b, m, 0] if np_gt_mixratios is not None else 1)
                     class_targets[b, index, match, :] = 0
                     class_targets[b, index, match, int(np_gt_ids[b, m, 0])] = 1
             # since some stages won't see partial anchors, so we have to slice the correct targets
+            # 最后对所有的标签做最后一次切分，得到B * (Cell*Anchor) * x 的格式
+            # (TO_DO:)这里的_slice方法的必要性，看的还不太明白
             objectness = self._slice(objectness, num_anchors, num_offsets)
             center_targets = self._slice(center_targets, num_anchors, num_offsets)
             scale_targets = self._slice(scale_targets, num_anchors, num_offsets)
@@ -183,6 +198,7 @@ class YOLOV3DynamicTargetGeneratorSimple(gluon.HybridBlock):
     """
     def __init__(self, num_class, ignore_iou_thresh, **kwargs):
         super(YOLOV3DynamicTargetGeneratorSimple, self).__init__(**kwargs)
+        # 检测的类别
         self._num_class = num_class
         self._ignore_iou_thresh = ignore_iou_thresh
         self._batch_iou = BBoxBatchIOU()
@@ -209,6 +225,8 @@ class YOLOV3DynamicTargetGeneratorSimple(gluon.HybridBlock):
             class_targets: a one-hot vector for classification.
 
         """
+        # 这里主要的作用在于确定需要忽略的mask
+        # 这里将iou值大于忽略阈值的所有ancho都置为-1,也即此时将正类也标记为-1
         with autograd.pause():
             box_preds = box_preds.reshape((0, -1, 4))
             objness_t = F.zeros_like(box_preds.slice_axis(axis=-1, begin=0, end=1))
@@ -277,14 +295,18 @@ class YOLOV3TargetMerger(gluon.HybridBlock):
             # use fixed target to override dynamic targets
             obj, centers, scales, weights, clas = zip(
                 dynamic_t, [obj_t, centers_t, scales_t, weights_t, clas_t])
+            # obj[1]是YOLOV3PrefetchTargetGenerator形成的正类
             mask = obj[1] > 0
+            # 还原正类的标签
             objectness = F.where(mask, obj[1], obj[0])
+            # 对于标签最后的维度不是一维的标签的操作
             mask2 = mask.tile(reps=(2,))
             center_targets = F.where(mask2, centers[1], centers[0])
             scale_targets = F.where(mask2, scales[1], scales[0])
             weights = F.where(mask2, weights[1], weights[0])
             mask3 = mask.tile(reps=(self._num_class,))
             class_targets = F.where(mask3, clas[1], clas[0])
+            # 是否使用label smoothing
             smooth_weight = 1. / self._num_class
             if self._label_smooth:
                 smooth_weight = min(1. / self._num_class, 1. / 40)
@@ -293,6 +315,9 @@ class YOLOV3TargetMerger(gluon.HybridBlock):
                 class_targets = F.where(
                     (class_targets < -0.5) + (class_targets > 0.5),
                     class_targets, F.ones_like(class_targets) * smooth_weight)
+            # 这里是为了区分要忽略的anchor
+            # mask是用来区分是否是正类的anchor
+            # (class_targets >= 0)是用来区分是否是需要被忽略的anchor
             class_mask = mask.tile(reps=(self._num_class,)) * (class_targets >= 0)
             return [F.stop_gradient(x) for x in [objectness, center_targets, scale_targets,
                                                  weights, class_targets, class_mask]]

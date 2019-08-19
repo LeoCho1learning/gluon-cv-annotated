@@ -252,6 +252,7 @@ def train(net, train_data, val_data, eval_metric, ctx, args):
             batch_size = batch[0].shape[0]
             data = gluon.utils.split_and_load(batch[0], ctx_list=ctx, batch_axis=0)
             # objectness, center_targets, scale_targets, weights, class_targets
+            # fixed_targets中包含了上述函数所包含的标签值
             fixed_targets = [gluon.utils.split_and_load(batch[it], ctx_list=ctx, batch_axis=0) for it in range(1, 6)]
             gt_boxes = gluon.utils.split_and_load(batch[6], ctx_list=ctx, batch_axis=0)
             sum_losses = []

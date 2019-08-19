@@ -455,7 +455,9 @@ class YOLOV3(gluon.HybridBlock):
                 box_preds = F.concat(*all_detections, dim=1)
                 all_preds = [F.concat(*p, dim=1) for p in [
                     all_objectness, all_box_centers, all_box_scales, all_class_pred]]
+                # 这里的self._target_generator是YOLOV3TargetMerger(len(classes), ignore_iou_thresh)
                 all_targets = self._target_generator(box_preds, *args)
+                # 这里*(all_preds + all_targets)是列表相加然后解开对应参数列表
                 return self._loss(*(all_preds + all_targets))
 
             # return raw predictions, this is only used in DataLoader transform function.

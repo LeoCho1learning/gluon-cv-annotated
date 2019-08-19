@@ -228,6 +228,7 @@ class YOLOV3Loss(Loss):
 
         """
         # compute some normalization count, except batch-size
+        # denorm----总的anchor的数量(13*13+26*26+52*52)*3
         denorm = F.cast(
             F.shape_array(objness_t).slice_axis(axis=0, begin=1, end=None).prod(), 'float32')
         weight_t = F.broadcast_mul(weight_t, objness_t)
