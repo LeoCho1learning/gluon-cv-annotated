@@ -122,6 +122,7 @@ class YOLOV3PrefetchTargetGenerator(gluon.Block):
             # TODO(zhreshold): the number of valid gt is not a big number, therefore for loop
             # should not be a problem right now. Switch to better solution is needed.
             # 外循环：batch的大小，内循环：一张图片中框的匹配层数
+            # 这里的循环其实也说明在yolov3训练
             for b in range(matches.shape[0]):
                 for m in range(matches.shape[1]):
                     # pad的过程中是向下增加pad，因此遇到第一个0时，就可跳出当前内循环，进去下一张图片
@@ -154,6 +155,7 @@ class YOLOV3PrefetchTargetGenerator(gluon.Block):
                     # 这里是为了减小box大小对于loss的影响，在YOLOv1中使用的是预测根号w的方式，这里采用的是如下加权重的方式
                     weights[b, index, match, :] = 2.0 - gtw * gth / orig_width / orig_height
                     # 这里一般讲objectness的target值设置为1
+                    # 这样的话,在没有使用mix_up的前提下,在这个target_generator中不同的anchor分为两类,iou最大匹配的设置为1,其他情况设置为0
                     objectness[b, index, match, 0] = (
                         np_gt_mixratios[b, m, 0] if np_gt_mixratios is not None else 1)
                     class_targets[b, index, match, :] = 0
@@ -236,6 +238,7 @@ class YOLOV3DynamicTargetGeneratorSimple(gluon.HybridBlock):
             class_t = F.ones_like(objness_t.tile(reps=(self._num_class))) * -1
             batch_ious = self._batch_iou(box_preds, gt_boxes)  # (B, N, M)
             ious_max = batch_ious.max(axis=-1, keepdims=True)  # (B, N, 1)
+            # 这里讲objness分为了两类,大于thresh的为-1,小于的定为负类,为0
             objness_t = (ious_max > self._ignore_iou_thresh) * -1  # use -1 for ignored
         return objness_t, center_t, scale_t, weight_t, class_t
 
@@ -291,6 +294,7 @@ class YOLOV3TargetMerger(gluon.HybridBlock):
 
         """
         with autograd.pause():
+            # 这里的box_preds是已经还原到原图上的坐标大小
             dynamic_t = self._dynamic_target(box_preds, gt_boxes)
             # use fixed target to override dynamic targets
             obj, centers, scales, weights, clas = zip(
@@ -299,7 +303,7 @@ class YOLOV3TargetMerger(gluon.HybridBlock):
             mask = obj[1] > 0
             # 还原正类的标签
             objectness = F.where(mask, obj[1], obj[0])
-            # 对于标签最后的维度不是一维的标签的操作
+            # 对于标签最后的维度不是一维的标签的操作,对应objness进行相应的操作
             mask2 = mask.tile(reps=(2,))
             center_targets = F.where(mask2, centers[1], centers[0])
             scale_targets = F.where(mask2, scales[1], scales[0])
@@ -316,8 +320,10 @@ class YOLOV3TargetMerger(gluon.HybridBlock):
                     (class_targets < -0.5) + (class_targets > 0.5),
                     class_targets, F.ones_like(class_targets) * smooth_weight)
             # 这里是为了区分要忽略的anchor
-            # mask是用来区分是否是正类的anchor
-            # (class_targets >= 0)是用来区分是否是需要被忽略的anchor
+            # mask是用来区分是否是正类的anchor---1(正类),0(忽略+负类)
+            # class_targets----1(正类),0(负类),-1(忽略)
+            # (class_targets >= 0)-----1(正类+负类),0(忽略)
+            # class_mask
             class_mask = mask.tile(reps=(self._num_class,)) * (class_targets >= 0)
             return [F.stop_gradient(x) for x in [objectness, center_targets, scale_targets,
                                                  weights, class_targets, class_mask]]

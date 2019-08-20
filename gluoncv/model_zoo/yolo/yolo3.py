@@ -181,6 +181,10 @@ class YOLOOutputV3(gluon.HybridBlock):
         offsets = offsets.reshape((1, -1, 1, 2))
 
         # 这里就是按照yolo3 paper中介绍anchor的方式，将预测值还原到原图上
+        # 这里可以看到,与论文中描述的相同,这里对于cx,cy的预测采用sigmoid,将预测值限制在(0,1)的区间内
+        # 对于w,h的预测采用线性的,后续再进行相应的转换
+        # 置信度利用sigmoid进行预测
+        # 类别条件概率同样使用sigmoid进行预测
         box_centers = F.broadcast_add(F.sigmoid(raw_box_centers), offsets) * self._stride
         box_scales = F.broadcast_mul(F.exp(raw_box_scales), anchors)
         confidence = F.sigmoid(objness)
@@ -188,6 +192,7 @@ class YOLOOutputV3(gluon.HybridBlock):
         wh = box_scales / 2.0
         # 收集预测出的框
         # 这里的bbox是corner的格式
+        # 这里的box已经是还原到原图上的坐标
         bbox = F.concat(box_centers - wh, box_centers + wh, dim=-1)
 
         if autograd.is_training():
@@ -456,6 +461,8 @@ class YOLOV3(gluon.HybridBlock):
                 all_preds = [F.concat(*p, dim=1) for p in [
                     all_objectness, all_box_centers, all_box_scales, all_class_pred]]
                 # 这里的self._target_generator是YOLOV3TargetMerger(len(classes), ignore_iou_thresh)
+                # *args是训练时通过net(x, gt_boxes[ix], *[ft[ix] for ft in fixed_targets])传进来的真实标签
+                # objectness, center_targets, scale_targets, weights, class_targets
                 all_targets = self._target_generator(box_preds, *args)
                 # 这里*(all_preds + all_targets)是列表相加然后解开对应参数列表
                 return self._loss(*(all_preds + all_targets))

@@ -231,9 +231,13 @@ class YOLOV3Loss(Loss):
         # denorm----总的anchor的数量(13*13+26*26+52*52)*3
         denorm = F.cast(
             F.shape_array(objness_t).slice_axis(axis=0, begin=1, end=None).prod(), 'float32')
+        # 将正类,负类,忽略的信息给添加上
         weight_t = F.broadcast_mul(weight_t, objness_t)
+        # hard_objness_t:用以区分了正类与其他类
         hard_objness_t = F.where(objness_t > 0, F.ones_like(objness_t), objness_t)
+        # 用以将忽略类置为0
         new_objness_mask = F.where(objness_t > 0, objness_t, objness_t >= 0)
+        # denorm的原因:
         obj_loss = F.broadcast_mul(
             self._sigmoid_ce(objness, hard_objness_t, new_objness_mask), denorm)
         center_loss = F.broadcast_mul(self._sigmoid_ce(box_centers, center_t, weight_t), denorm * 2)
