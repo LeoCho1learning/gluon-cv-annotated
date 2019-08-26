@@ -207,7 +207,9 @@ class FPNFeatureExpander(SymbolBlock):
         #            'stage3_activation5', 'stage4_activation2']
         # with regard to [conv2, conv3, conv4, conv5] -> [C2, C3, C4, C5]
         # append more layers with reversed order : [P5, P4, P3, P2]
+        # y是最顶层(分辨率最小)的特征图
         y = outputs[-1]
+        # 为了方便组建金字塔,逆序存储一下
         base_features = outputs[::-1]
         num_stages = len(num_filters) + 1  # usually 5
         weight_init = mx.init.Xavier(rnd_type='gaussian', factor_type='out', magnitude=2.)
@@ -215,17 +217,21 @@ class FPNFeatureExpander(SymbolBlock):
         # num_filter is 256 in ori paper
         for i, (bf, f) in enumerate(zip(base_features, num_filters)):
             if i == 0:
+            # 当i为0时,即为使用的是上面的y(语义层级最高的特征图),这里是不需要与其他特征层做特征融合的
                 if use_1x1:
+                    # 是否添加一个1*1的卷积层
                     y = mx.sym.Convolution(y, num_filter=f, kernel=(1, 1), pad=(0, 0),
                                            stride=(1, 1), no_bias=no_bias,
                                            name="P{}_conv_lat".format(num_stages - i),
                                            attr={'__init__': weight_init})
+                    # 是否添加一个BN层
                     if norm_layer is not None:
                         if norm_layer is SyncBatchNorm:
                             norm_kwargs['key'] = "P{}_lat_bn".format(num_stages - i)
                             norm_kwargs['name'] = "P{}_lat_bn".format(num_stages - i)
                         y = norm_layer(y, **norm_kwargs)
                 if use_p6 and p6_conv:
+                    # p6一般只用于paper中对与RPN的实验中
                     # method 2 : use conv (Deformable use this)
                     y_p6 = mx.sym.Convolution(y, num_filter=f, kernel=(3, 3), pad=(1, 1),
                                               stride=(2, 2), no_bias=no_bias,
@@ -238,28 +244,35 @@ class FPNFeatureExpander(SymbolBlock):
                         y_p6 = norm_layer(y_p6, **norm_kwargs)
             else:
                 if use_1x1:
+                    # 是否添加1*1的卷积层
                     bf = mx.sym.Convolution(bf, num_filter=f, kernel=(1, 1), pad=(0, 0),
                                             stride=(1, 1), no_bias=no_bias,
                                             name="P{}_conv_lat".format(num_stages - i),
                                             attr={'__init__': weight_init})
+                    # 是否添加BN层
                     if norm_layer is not None:
                         if norm_layer is SyncBatchNorm:
                             norm_kwargs['key'] = "P{}_conv1_bn".format(num_stages - i)
                             norm_kwargs['name'] = "P{}_conv1_bn".format(num_stages - i)
                         bf = norm_layer(bf, **norm_kwargs)
+                # 是否需要上采样
+                # 这里在FPN中使用的是最近邻插值
                 if use_upsample:
                     y = mx.sym.UpSampling(y, scale=2, sample_type='nearest',
                                           name="P{}_upsp".format(num_stages - i))
-
+                # 是否使用element-wise add的方法进行特征融合
                 if use_elewadd:
                     # make two symbol alignment
                     # method 1 : mx.sym.Crop
                     # y = mx.sym.Crop(*[y, bf], name="P{}_clip".format(num_stages-i))
                     # method 2 : mx.sym.slice_like
+                    # 上面使用了最近邻的插值算法,有可能上采样出来的特征图大小与这一层的特征图大小
+                    # 不是完全一致,因此需要crop到相同的大小
                     y = mx.sym.slice_like(y, bf * 0, axes=(2, 3),
                                           name="P{}_clip".format(num_stages - i))
                     y = mx.sym.ElementWiseSum(bf, y, name="P{}_sum".format(num_stages - i))
             # Reduce the aliasing effect of upsampling described in ori paper
+            # 通过一个3*3的卷积消除FPN操作带来的混叠效应
             out = mx.sym.Convolution(y, num_filter=f, kernel=(3, 3), pad=(1, 1), stride=(1, 1),
                                      no_bias=no_bias, name='P{}_conv1'.format(num_stages - i),
                                      attr={'__init__': weight_init})
@@ -276,6 +289,7 @@ class FPNFeatureExpander(SymbolBlock):
         if use_p6:
             outputs = tmp_outputs[::-1] + [y_p6]  # [P2, P3, P4, P5] + [P6]
         else:
+            # 这里只输出了[P2, P3, P4, P5],对应的下采样倍数分别为*4, *8, *16, *32
             outputs = tmp_outputs[::-1]  # [P2, P3, P4, P5]
 
         super(FPNFeatureExpander, self).__init__(outputs, inputs, params)

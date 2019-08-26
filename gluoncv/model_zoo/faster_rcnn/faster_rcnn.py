@@ -156,7 +156,36 @@ class FasterRCNN(RCNN):
         Generate training targets with boxes, samples, matches, gt_label and gt_box.
 
     """
-
+    '''
+    这里的注释以faster_rcnn_fpn_resnet50_v1b_coco为例
+    features----FPN中多尺度输出的不同大小的特征图,[P2, P3, P4, P5]
+    top_features----Tail feature extractor after feature pooling layer(暂时没有做出很好的对应),None
+    classes---特征的种类
+    box_features----2 FC layer before RCNN cls and reg,这里是两个1024的FC layer
+    short, max_size----图片送入进来时,resize的长短边界限
+    min_stage, max_stage----这里应该指的是FPN输出的阶数中最小和最大的序号
+    train_patterns----(TO_DO)暂时还没有理解这个参数的作用
+    nms_thresh----nms中的iou阈值, 0.5
+    nms_topk----对预测得分前k个进行nms操作, -1
+    post_nms----nms后,输出前多少的结果, -1
+    roi_mode----选择roi-pooling或者roi-align
+    roi_size----roi-region的大小, (7,7)
+    strides----(4, 8, 16, 32, 64), 这里其实是输出了4个stage,64这一层是怎么来的(TO_DO)
+    clip---- Clip bounding box target to this value, 4.14(TO_DO)没有明白这里为什么要设置成4.14
+    rpn_channel----Channel number used in RPN convolutional layers, 1024
+    base_size, scales, ratios, alloc_size----设置anchor时会使用得到的参数
+    rpn_nms_thresh----训练过程中rpn中nms处理过程中的iou阈值
+    rpn_train_pre_nms, rpn_train_post_nms----train过程中,nms的一些参数
+    rpn_test_pre_nms, rpn_test_post_nms----test过程中, nms的一些参数
+    rpn_min_size----rpn最后输出框的最小尺寸,当nms之后需要输出的框的尺寸小于这个尺寸时,
+    直接取消掉, 1
+    num_sample----作为RCNN过程的目标框数量, 512
+    pos_iou_thresh----RCNN的target生成过程中会有使用到,0.5,指输出框与目标框的iou高于0.5即认为是
+    正类框
+    pos_ratio----正样本采样的比例,这里就是指,经过上面匹配出来的正样本并不是每一个都会用于RCNN的
+    训练,而是会按照一定的比例进行采样处理
+    additional_output----在mask
+    '''
     def __init__(self, features, top_features, classes, box_features=None,
                  short=600, max_size=1000, min_stage=4, max_stage=4, train_patterns=None,
                  nms_thresh=0.3, nms_topk=400, post_nms=100,
@@ -167,6 +196,7 @@ class FasterRCNN(RCNN):
                  rpn_test_pre_nms=6000, rpn_test_post_nms=300, rpn_min_size=16,
                  num_sample=128, pos_iou_thresh=0.5, pos_ratio=0.25, max_num_gt=300,
                  additional_output=False, force_nms=False, **kwargs):
+        # 这里就是利用super方法,调用了RCNN的初始化方法,也就是相当于初始化生成了一个RCNN模块
         super(FasterRCNN, self).__init__(
             features=features, top_features=top_features, classes=classes,
             box_features=box_features, short=short, max_size=max_size,
@@ -179,19 +209,26 @@ class FasterRCNN(RCNN):
             rpn_test_post_nms = rpn_test_pre_nms
 
         self.ashape = alloc_size[0]
+        # 这里根据输入参数来确定,在选定的示例中,min_stage = 2, max_stage = 6
         self._min_stage = min_stage
         self._max_stage = max_stage
+        # 则阶数self.num_stages为5阶
         self.num_stages = max_stage - min_stage + 1
         if self.num_stages > 1:
             assert len(scales) == len(strides) == self.num_stages, \
                 "The num_stages (%d) must match number of scales (%d) and strides (%d)" \
                 % (self.num_stages, len(scales), len(strides))
+        # 现在支持的最大batch size为1
         self._max_batch = 1  # currently only support batch size = 1
         self._num_sample = num_sample
         self._rpn_test_post_nms = rpn_test_post_nms
+        # 这里的RCNNTargetGenerator,表示的就是得到的RPN的结果后应该如何生成RCNN使用的target
+        # (TO_DO)这里在使用到的时候再看
         self._target_generator = {RCNNTargetGenerator(self.num_class)}
+        # self._additional_output在Mask RCNN中使用,用于存储中间变量
         self._additional_output = additional_output
         with self.name_scope():
+            # 这里生成RPN模块
             self.rpn = RPN(
                 channels=rpn_channel, strides=strides, base_size=base_size,
                 scales=scales, ratios=ratios, alloc_size=alloc_size,
@@ -600,8 +637,10 @@ def faster_rcnn_fpn_resnet50_v1b_coco(pretrained=False, pretrained_base=True, **
     from ...data import COCODetection
     classes = COCODetection.CLASSES
     pretrained_base = False if pretrained else pretrained_base
+    # resnet50作为backbone,这里是gluoncv更新过后的resnet50
     base_network = resnet50_v1b(pretrained=pretrained_base, dilated=False,
                                 use_global_stats=True, **kwargs)
+    # 组成FPN的特征提取层,这里只输出了[P2, P3, P4, P5]
     features = FPNFeatureExpander(
         network=base_network,
         outputs=['layers1_relu8_fwd', 'layers2_relu11_fwd', 'layers3_relu17_fwd',
@@ -880,8 +919,10 @@ def faster_rcnn_fpn_resnet101_v1d_coco(pretrained=False, pretrained_base=True, *
     from ...data import COCODetection
     classes = COCODetection.CLASSES
     pretrained_base = False if pretrained else pretrained_base
+    # base_network为resnet101_v1d
     base_network = resnet101_v1d(pretrained=pretrained_base, dilated=False,
                                  use_global_stats=True, **kwargs)
+    # 这里填入FPN的模块
     features = FPNFeatureExpander(
         network=base_network,
         outputs=['layers1_relu8_fwd', 'layers2_relu11_fwd', 'layers3_relu68_fwd',

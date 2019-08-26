@@ -96,8 +96,10 @@ class RCNN(gluon.HybridBlock):
             self.features = features
             self.top_features = top_features
             self.box_features = box_features
+            # (TO_DO):这里的通道数按如下设置的理由:
             self.class_predictor = nn.Dense(
                 self.num_class + 1, weight_initializer=mx.init.Normal(0.01))
+            # (TO_DO)这里的通道数按如下设置的理由:
             self.box_predictor = nn.Dense(
                 self.num_class * 4, weight_initializer=mx.init.Normal(0.001))
             self.cls_decoder = MultiPerClassDecoder(num_class=self.num_class + 1)

@@ -154,10 +154,12 @@ def get_dataloader(net, train_dataset, val_dataset, train_transform, val_transfo
                    args):
     """Get dataloader."""
     train_bfn = batchify.Tuple(*[batchify.Append() for _ in range(5)])
+    # 如果不是分布式训练就是None
     train_sampler = gcv.nn.sampler.SplitSampler(len(train_dataset), hvd.size(),
                                                 hvd.rank()) if args.horovod else None
     train_loader = mx.gluon.data.DataLoader(
         train_dataset.transform(
+            # net.short默认是600,是一个可以设置的值
             train_transform(net.short, net.max_size, net, ashape=net.ashape,
                             multi_stage=args.use_fpn)),
         batch_size, train_sampler is None, sampler=train_sampler, batchify_fn=train_bfn,
@@ -440,7 +442,7 @@ def train(net, train_data, val_data, eval_metric, ctx, args):
 
 if __name__ == '__main__':
     import sys
-
+    # 防止递归层数带来的程序崩溃
     sys.setrecursionlimit(1100)
     args = parse_args()
     # fix seed for mxnet, numpy and python builtin random generator.
@@ -450,9 +452,11 @@ if __name__ == '__main__':
         amp.init()
 
     # training contexts
+    # 用于分布式训练的选项
     if args.horovod:
         ctx = [mx.gpu(hvd.local_rank())]
         args.batch_size = hvd.size()
+    # 用于单机多卡训练
     else:
         ctx = [mx.gpu(int(i)) for i in args.gpus.split(',') if i.strip()]
         ctx = ctx if ctx else [mx.cpu()]
@@ -469,9 +473,11 @@ if __name__ == '__main__':
             kwargs['num_devices'] = len(args.gpus.split(','))
     net_name = '_'.join(('faster_rcnn', *module_list, args.network, args.dataset))
     args.save_prefix += net_name
+    # 调用的网络名,例如:faster_rcnn_fpn_resnet50_v1b_coco
     net = get_model(net_name, pretrained_base=True, **kwargs)
     if args.resume.strip():
         net.load_parameters(args.resume.strip())
+    # 初始化模型
     else:
         for param in net.collect_params().values():
             if param._data is not None:
@@ -480,9 +486,10 @@ if __name__ == '__main__':
     net.collect_params().reset_ctx(ctx)
 
     # training data
-
     train_dataset, val_dataset, eval_metric = get_dataset(args.dataset, args)
     batch_size = 1 if args.horovod else args.batch_size
+    
+    #获取 
     train_data, val_data = get_dataloader(
         net, train_dataset, val_dataset, FasterRCNNDefaultTrainTransform,
         FasterRCNNDefaultValTransform, batch_size, args)

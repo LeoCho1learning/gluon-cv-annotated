@@ -364,15 +364,18 @@ if __name__ == '__main__':
     gutils.random.seed(args.seed)
 
     # training contexts
+    # 分布式训练
     if args.horovod:
         ctx = [mx.gpu(hvd.local_rank())]
     else:
+        # 单机多卡训练
         ctx = [mx.gpu(int(i)) for i in args.gpus.split(',') if i.strip()]
         ctx = ctx if ctx else [mx.cpu()]
 
     # network
     net_name = '_'.join(('ssd', str(args.data_shape), args.network, args.dataset))
     args.save_prefix += net_name
+    # 是否使用同步BN
     if args.syncbn and len(ctx) > 1:
         net = get_model(net_name, pretrained_base=True, norm_layer=gluon.contrib.nn.SyncBatchNorm,
                         norm_kwargs={'num_devices': len(ctx)})
