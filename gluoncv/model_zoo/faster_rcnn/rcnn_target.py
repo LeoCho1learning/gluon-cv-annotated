@@ -30,8 +30,11 @@ class RCNNTargetSampler(gluon.HybridBlock):
     """
     def __init__(self, num_image, num_proposal, num_sample, pos_iou_thresh, pos_ratio, max_num_gt):
         super(RCNNTargetSampler, self).__init__()
+        # (TODO)这里指的是max_batch的数量,目前暂时设置为1
         self._num_image = num_image
+        # _num_proposal----从RPN中输入的box的数量,也就为rpn最后nms后的输出的box的数量
         self._num_proposal = num_proposal
+        # _num_sample----最后需要输出的,采样得到的正负样本的总数量,示例中为512
         self._num_sample = num_sample
         self._max_pos = int(round(num_sample * pos_ratio))
         self._pos_iou_thresh = pos_iou_thresh

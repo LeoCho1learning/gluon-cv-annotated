@@ -46,6 +46,7 @@ class RPNAnchorGenerator(gluon.HybridBlock):
 
         anchors = self._generate_anchors(stride, base_size, ratios, scales, alloc_size)
         self._num_depth = len(ratios) * len(scales)
+        # 相当于将anchor注册到forward中去
         self.anchors = self.params.get_constant('anchor_', anchors)
 
     @property

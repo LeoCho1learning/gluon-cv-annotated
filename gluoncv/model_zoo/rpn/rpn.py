@@ -57,7 +57,17 @@ class RPN(gluon.HybridBlock):
         Whether to extract feature from multiple level. This is used in FPN.
 
     """
-
+    '''
+    channels----RPN中使用的卷积核数
+    strides----(4, 8, 16, 32, 64), 这里其实是输出了4个stage,64这一层是怎么来的(TO_DO)
+    base_size, scales, ratios, alloc_size----设置anchor时会使用得到的参数
+    clip----Clip bounding box target to this value, 4.14(TO_DO)没有明白这里为什么要设置成4.14
+    nms_thresh----rpn中nms使用的iou阈值
+    train_pre_nms, train_post_nms, test_pre_nms,test_post_nms----nms过程中的相关参数
+    min_size----rpn最后输出框的最小尺寸,当nms之后需要输出的框的尺寸小于这个尺寸时,
+    直接取消掉, 1
+    multi_level----指示是否是多层输出,示例中因为是FPN,所以为true
+    '''
     def __init__(self, channels, strides, base_size, scales, ratios, alloc_size,
                  clip, nms_thresh, train_pre_nms, train_post_nms,
                  test_pre_nms, test_post_nms, min_size, multi_level=False, **kwargs):
@@ -73,12 +83,18 @@ class RPN(gluon.HybridBlock):
             if self._multi_level:
                 asz = alloc_size
                 self.anchor_generator = nn.HybridSequential()
+                # scale在示例中为(2, 4, 8, 16, 32),这里是RPN生成anchor所必须用到的参数
+                # 这里的循环相当于是每一阶的特征图的每一个像素都有三个anchor,不同阶的scale大小不一样
                 for _, st, s in zip(range(num_stages), strides, scales):
                     stage_anchor_generator = RPNAnchorGenerator(st, base_size, ratios, s, asz)
                     self.anchor_generator.add(stage_anchor_generator)
                     asz = max(asz[0] // 2, 16)
                     asz = (asz, asz)  # For FPN, We use large anchor presets
+                # 这里的anchor_depth就相当于是每个像素生成的anchor的数量
                 anchor_depth = self.anchor_generator[0].num_depth
+                # 生成RPN的预测head
+                # 这里的RPN_head的channels在示例中是1024,(TO_DO)为什么是1024,这里没有
+                # 将RPN_head放入到循环中,应该是进行了参数共享
                 self.rpn_head = RPNHead(channels, anchor_depth)
             else:
                 self.anchor_generator = RPNAnchorGenerator(
@@ -92,7 +108,7 @@ class RPN(gluon.HybridBlock):
                 self.score = nn.Conv2D(anchor_depth, 1, 1, 0, weight_initializer=weight_initializer)
                 self.loc = nn.Conv2D(anchor_depth * 4, 1, 1, 0,
                                      weight_initializer=weight_initializer)
-
+            # 生成proposal模块,用于将RPN的预测结果转换为前景与背景
             self.region_proposer = RPNProposal(clip, min_size, stds=(1., 1., 1., 1.))
 
     # pylint: disable=arguments-differ
@@ -193,6 +209,8 @@ class RPNHead(gluon.HybridBlock):
             # use sigmoid instead of softmax, reduce channel numbers
             # Note : that is to say, if use softmax here,
             # then the self.score will anchor_depth*2 output channel
+            # 这里选择使用sigmoid作为RPN的分类head的激活函数,RPN只需要负责二分类,因此这里
+            # 的通道数等于anchor的数量即可
             self.score = nn.Conv2D(anchor_depth, 1, 1, 0, weight_initializer=weight_initializer)
             self.loc = nn.Conv2D(anchor_depth * 4, 1, 1, 0, weight_initializer=weight_initializer)
 
