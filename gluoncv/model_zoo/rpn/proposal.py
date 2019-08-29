@@ -26,7 +26,7 @@ class RPNProposal(gluon.HybridBlock):
     nms : boolean
         Whether to do nms.
     """
-
+    # 收集RPN的预测结果,包括各个anchor的得分,位置的偏移,然后进行NMS操作,最后用于提供前景框
     def __init__(self, clip, min_size, stds):
         super(RPNProposal, self).__init__()
         self._box_to_center = BBoxCornerToCenter()

@@ -196,6 +196,7 @@ class FasterRCNN(RCNN):
                  rpn_test_pre_nms=6000, rpn_test_post_nms=300, rpn_min_size=16,
                  num_sample=128, pos_iou_thresh=0.5, pos_ratio=0.25, max_num_gt=300,
                  additional_output=False, force_nms=False, **kwargs):
+        # 这里一定要注意
         # 这里就是利用super方法,调用了RCNN的初始化方法,也就是相当于初始化生成了一个RCNN模块
         super(FasterRCNN, self).__init__(
             features=features, top_features=top_features, classes=classes,

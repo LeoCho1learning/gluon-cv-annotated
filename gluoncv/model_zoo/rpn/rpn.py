@@ -103,7 +103,7 @@ class RPN(gluon.HybridBlock):
                 # not using RPNHead to keep backward compatibility with old models
                 weight_initializer = mx.init.Normal(0.01)
                 self.conv1 = nn.HybridSequential()
-                self.conv1.add(nn.Conv2D(channels, 3, 1, 1, weight_initializer=weight_initializer),
+                self.conv1.add(nn.C onv2D(channels, 3, 1, 1, weight_initializer=weight_initializer),
                                nn.Activation('relu'))
                 self.score = nn.Conv2D(anchor_depth, 1, 1, 0, weight_initializer=weight_initializer)
                 self.loc = nn.Conv2D(anchor_depth * 4, 1, 1, 0,

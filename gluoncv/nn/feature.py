@@ -195,10 +195,23 @@ class FPNFeatureExpander(SymbolBlock):
         Name of input variables to the network.
 
     """
-
+    '''
+    具体参数都以挑选的模型为例
+    network----挑选的backbone网络,例如resnet101等
+    outputs----输出的特征层
+    num_filters,use_1x1-----[256, 256, 256, 256], True,通过这两个参数的设置,将outputs的输出通过
+    一个1*1的卷积转换为num_filters
+    use_upsample, use_elewadd----True, True
+    use_p6, p6_conv----True, True,在所选的示例模型中,需要添加第5层输出
+    no_bias
+    pretrained
+    norm_layer
+    norm_kwargs
+    '''
     def __init__(self, network, outputs, num_filters, use_1x1=True, use_upsample=True,
                  use_elewadd=True, use_p6=False, p6_conv=True, no_bias=True, pretrained=False,
                  norm_layer=None, norm_kwargs=None, ctx=mx.cpu(), inputs=('data',)):
+        # 通过_parse_network获取outouts制定的特征层的输出
         inputs, outputs, params = _parse_network(network, outputs, inputs, pretrained, ctx)
         if norm_kwargs is None:
             norm_kwargs = {}
@@ -286,10 +299,11 @@ class FPNFeatureExpander(SymbolBlock):
                     norm_kwargs['name'] = "P{}_bn".format(num_stages - i)
                 out = norm_layer(out, **norm_kwargs)
             tmp_outputs.append(out)
+        # 从下面可以看出,在FPN中,其实P6并没有参与到特征回传的过程中 
         if use_p6:
             outputs = tmp_outputs[::-1] + [y_p6]  # [P2, P3, P4, P5] + [P6]
         else:
-            # 这里只输出了[P2, P3, P4, P5],对应的下采样倍数分别为*4, *8, *16, *32
-            outputs = tmp_outputs[::-1]  # [P2, P3, P4, P5]
+            # 这里只输出了[P2, P3, P4, P5, P6],对应的下采样倍数分别为*4, *8, *16, *32, *64
+            outputs = tmp_outputs[::-1]  # [P2, P3, P4, P5, P6]
 
         super(FPNFeatureExpander, self).__init__(outputs, inputs, params)

@@ -114,9 +114,14 @@ class RPNTargetGenerator(gluon.Block):
     def __init__(self, num_sample=256, pos_iou_thresh=0.7, neg_iou_thresh=0.3,
                  pos_ratio=0.5, stds=(1., 1., 1., 1.), allowed_border=0):
         super(RPNTargetGenerator, self).__init__()
+        # (TODO)这里的_num_sample指的是
+        # 按照示例,num_sample使用的是默认值256
         self._num_sample = num_sample
+        # 这里按照示例pos_iou_thresh=0.7, neg_iou_thresh=0.3,即取iou高于0.7为正样本,iou低于0.3为负样本
+        # iou值在高低界限之间的忽略不计
         self._pos_iou_thresh = pos_iou_thresh
         self._neg_iou_thresh = neg_iou_thresh
+        # pos_ratio:采样样本中的正样本比例
         self._pos_ratio = pos_ratio
         self._allowed_border = allowed_border
         self._bbox_split = BBoxSplit(axis=-1)
@@ -147,12 +152,15 @@ class RPNTargetGenerator(gluon.Block):
         with autograd.pause():
             # calculate ious between (N, 4) anchors and (M, 4) bbox ground-truths
             # ious is (N, M)
+            # 计算anchor与box之间的iou值
             ious = mx.nd.contrib.box_iou(anchor, bbox, format='corner').asnumpy()
 
             # mask out invalid anchors, (N, 4)
             a_xmin, a_ymin, a_xmax, a_ymax = mx.nd.split(anchor, 4, axis=-1)
+            # 首先将超出图像边界的anchor都置为-1,即需要被忽略的anchor
             invalid_mask = (a_xmin < 0) + (a_ymin < 0) + (a_xmax >= width) + (a_ymax >= height)
             ious = np.where(invalid_mask.asnumpy(), -1.0, ious)
+            # 进行采样操作
             samples, matches = self._sampler(ious)
 
             # training targets for RPN

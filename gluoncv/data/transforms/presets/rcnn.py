@@ -159,9 +159,13 @@ class FasterRCNNDefaultTrainTransform(object):
         # use fake data to generate fixed anchors for target generation
         anchors = []  # [P2, P3, P4, P5]
         # in case network has reset_ctx to gpu
+        # 这里的anchor_generator中有着5个不同阶的anchor_generator
+        # (TODO)为什么这里要使用深拷贝
         anchor_generator = copy.deepcopy(net.rpn.anchor_generator)
+        # (TODO)这一句的作用是什么
         anchor_generator.collect_params().reset_ctx(None)
         if self._multi_stage:
+            # 将不同的输出阶的anchor集合起来
             for ag in anchor_generator:
                 anchor = ag(mx.nd.zeros((1, 3, ashape, ashape))).reshape((1, 1, ashape, ashape, -1))
                 ashape = max(ashape // 2, 16)
@@ -169,12 +173,16 @@ class FasterRCNNDefaultTrainTransform(object):
         else:
             anchors = anchor_generator(
                 mx.nd.zeros((1, 3, ashape, ashape))).reshape((1, 1, ashape, ashape, -1))
+        # 注册为类变量
         self._anchors = anchors
         # record feature extractor for infer_shape
         if not hasattr(net, 'features'):
             raise ValueError("Cannot find features in network, it is a Faster-RCNN network?")
+        # (TODO)
         self._feat_sym = net.features(mx.sym.var(name='data'))
+        # 生成RPNTargetGenerator,为RPN过程生成anchor
         from ....model_zoo.rpn.rpn_target import RPNTargetGenerator
+        # (TODO)num_sample----Number of samples for RPN targets.
         self._target_generator = RPNTargetGenerator(
             num_sample=num_sample, pos_iou_thresh=pos_iou_thresh,
             neg_iou_thresh=neg_iou_thresh, pos_ratio=pos_ratio,
@@ -183,15 +191,20 @@ class FasterRCNNDefaultTrainTransform(object):
     def __call__(self, src, label):
         """Apply transform to training image/label."""
         # resize shorter side but keep in max_size
+        # 获取图片的高宽
         h, w, _ = src.shape
+        # 是否采用_random_resize策略
         if self._random_resize:
             short = randint(self._short[0], self._short[1])
         else:
             short = self._short
+        # 对img进行resize
         img = timage.resize_short_within(src, short, self._max_size, interp=1)
+        # 对box进行相应的变换
         bbox = tbbox.resize(label, (w, h), (img.shape[1], img.shape[0]))
 
         # random horizontal flip
+        # 在faster rcnn中数据增强只有水平翻转
         h, w, _ = img.shape
         img, flips = timage.random_flip(img, px=self._flip_p)
         bbox = tbbox.flip(bbox, (w, h), flip_x=flips[0])
@@ -206,15 +219,21 @@ class FasterRCNNDefaultTrainTransform(object):
         # generate RPN target so cpu workers can help reduce the workload
         # feat_h, feat_w = (img.shape[1] // self._stride, img.shape[2] // self._stride)
         gt_bboxes = mx.nd.array(bbox[:, :4])
+        # 是否使用多层阶输出
         if self._multi_stage:
             oshapes = []
             anchor_targets = []
+            # 这里的_feat_sym是从FPNFeatureExpander提取出来的不同大小的特征图
+            # 也就是[P2, P3, P4, P5, P6]
             for feat_sym in self._feat_sym:
+                # 这里是为了获得不同输出层阶的输出特征图的大小
                 oshapes.append(feat_sym.infer_shape(data=(1, 3, img.shape[1], img.shape[2]))[1][0])
             for anchor, oshape in zip(self._anchors, oshapes):
+                # 划取一部分作为这一阶的anchor
                 anchor = anchor[:, :, :oshape[2], :oshape[3], :].reshape((-1, 4))
                 anchor_targets.append(anchor)
             anchor_targets = mx.nd.concat(*anchor_targets, dim=0)
+            # 这里的gt_bboxes, anchor_targets都没有batch的维度
             cls_target, box_target, box_mask = self._target_generator(
                 gt_bboxes, anchor_targets, img.shape[2], img.shape[1])
         else:

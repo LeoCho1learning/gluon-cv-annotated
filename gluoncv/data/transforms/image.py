@@ -169,14 +169,20 @@ def resize_short_within(src, short, max_size, mult_base=1, interp=2):
     <NDArray 800x1184x3 @cpu(0)>
     """
     from mxnet.image.image import _get_interp_method as get_interp
-    h, w, _ = src.shape
+    # 获取图像的高宽和通道数
+    h, w, _ = src.shape  
+    # 区分出输入图像的长短边大小
     im_size_min, im_size_max = (h, w) if w > h else (w, h)
+    # 获取将短边放缩到600的比例
     scale = float(short) / float(im_size_min)
+    #如果这里短边取比例之后，然后长边映射完比规定值更大，则重新计算scale的值
+    # mult_base----Width and height are rounded to multiples of `mult_base`.
     if np.round(scale * im_size_max / mult_base) * mult_base > max_size:
         # fit in max_size
         scale = float(np.floor(max_size / mult_base) * mult_base) / float(im_size_max)
     new_w, new_h = (int(np.round(w * scale / mult_base) * mult_base),
                     int(np.round(h * scale / mult_base) * mult_base))
+    #在最后得到的值中其实不一定短边就是600这样，但最大和最小一般总是要满足一个的
     return imresize(src, new_w, new_h, interp=get_interp(interp, (h, w, new_h, new_w)))
 
 def random_pca_lighting(src, alphastd, eigval=None, eigvec=None):

@@ -160,6 +160,8 @@ def get_dataloader(net, train_dataset, val_dataset, train_transform, val_transfo
     train_loader = mx.gluon.data.DataLoader(
         train_dataset.transform(
             # net.short默认是600,是一个可以设置的值
+            # train_transform----FasterRCNNDefaultTrainTransform
+            # 对于示例,net.short----800, net.max_size----1333
             train_transform(net.short, net.max_size, net, ashape=net.ashape,
                             multi_stage=args.use_fpn)),
         batch_size, train_sampler is None, sampler=train_sampler, batchify_fn=train_bfn,
@@ -460,6 +462,11 @@ if __name__ == '__main__':
     else:
         ctx = [mx.gpu(int(i)) for i in args.gpus.split(',') if i.strip()]
         ctx = ctx if ctx else [mx.cpu()]
+        # 目前在mxnet的视线中,我们设置一张卡上的batch_size
+        # 对于这样的设置,目前所能够想到的解释是
+        # 一种是这个模型会极大的消耗内存,只能存下一张
+        # (TODO)另一种想法仍然有待确认,在faster rcnn的训练中，
+        # 由于每个样本resize过后的大小都有可能不相同，无法放到同一个batch当中
         args.batch_size = len(ctx)  # 1 batch per device
 
     # network
